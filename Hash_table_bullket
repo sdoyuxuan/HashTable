@@ -1,0 +1,369 @@
+#include <iostream>
+#include <vector>
+#include <assert.h>
+using namespace std;
+const int _PrimeSize = 28;
+static const unsigned long _PrimeList[_PrimeSize] =
+{
+	53ul, 97ul, 193ul, 389ul, 769ul,
+	1543ul, 3079ul, 6151ul, 12289ul, 24593ul,
+	49157ul, 98317ul, 196613ul, 393241ul, 786433ul,
+	50331653ul, 100663319ul, 201326611ul, 402653189ul, 805306457ul,
+	1610612741ul, 3221225473ul, 4294967291ul
+};
+template<class K, class V>
+struct HashNode
+{
+	HashNode(const pair<K, V>& kv)
+	: _kv(kv)
+	, _pNext(NULL)
+	{}
+
+	pair<K, V> _kv;
+	HashNode<K, V>* _pNext;
+};
+
+template <class K>
+class _HashFun;
+template<class K, class V,class HashFun=_HashFun<K>>
+class HashTable;
+
+
+// 迭代器
+template<class K, class V, class Ref, class Ptr>
+class HashTableIterator
+{
+	typedef HashNode<K, V> Node;
+	typedef HashTableIterator<K, V, Ref, Ptr> Self;
+public:
+	HashTableIterator()
+		: _pNode(NULL)
+		, _ht(NULL)
+	{}
+
+	HashTableIterator(Node* pNode, HashTable<K, V>* ht)
+		: _pNode(pNode)
+		, _ht(ht)
+	{}
+
+	HashTableIterator(const Self& s)
+		: _pNode(s._pNode)
+		, _ht(s._ht)
+	{}
+
+	Self& operator++()
+	{
+		assert(_pNode);
+		Next();
+		return *this;
+	}
+	Self operator++(int)
+	{
+		assert(_pNode);
+		Self temp = *this;
+		Next();
+		return temp;
+	}
+
+	Ref operator*()
+	{
+		return _pNode->_kv;
+	}
+	Ptr operator->()
+	{
+		return &_pNode->_kv;
+	}
+	bool operator==(const Self& s)
+	{
+		return _pNode == s._pNode;
+	}
+	bool operator!=(const Self& s)
+	{
+		return _pNode != s._pNode;
+	}
+private:
+	void Next()
+	{
+		if (_pNode->_pNext)
+		{
+			_pNode = _pNode->_pNext;
+		}
+		else
+		{
+			size_t bullket = _ht->_HashFunc(_pNode->_kv.first);
+			size_t idx = 0;
+			size_t size = (_ht->_table).size();
+			for (idx = bullket + 1; idx <size; idx++)
+			{
+				if (_ht->_table[idx]) break;
+			}
+			_pNode = (idx<size) ? _ht->_table[idx] : NULL; // for出来 俩种情况，第一种 找到了下一个有单链表的有效桶号，第二种情况是哈希表中再无 有单链表的哈希桶了,即idx出来后等于size。
+		}
+	}
+private:
+	Node* _pNode;
+	HashTable<K, V>* _ht;
+};
+
+static size_t BKDRHash(const char * str)
+{
+	unsigned int seed = 131; // 31 131 1313 13131 131313	
+	unsigned int hash = 0;
+	while (*str)
+	{
+		hash = hash * seed + (*str++);
+	}
+	return (hash & 0x7FFFFFFF);
+}
+template <class K>
+class _HashFun
+{
+public:
+	K operator ()(K key)
+	{
+		return key;
+	}
+};
+template<>
+class _HashFun<string>
+{
+public:
+	size_t operator()(const string&key)
+	{
+		return BKDRHash(key.c_str());
+	}
+};
+// 作业--->
+//哈希桶
+template<class K,class V,class HashFun = _HashFun<K>>
+class HashTable
+{
+	typedef HashNode<K, V> Node;
+	friend  class HashTableIterator<K, V, pair<K, V>&, pair<K, V>*>;
+public:
+	typedef HashTableIterator<K, V, pair<K, V>&, pair<K, V>*> Iterator;
+
+public:
+	HashTable(size_t size = 13)
+		: _size(0)
+	{
+		_table.resize(GetNextPrime(size));
+	}
+
+	~HashTable()
+	{
+		Clear();
+	}
+
+	///////////////////////////////////////////////
+	Iterator Begin()
+	{
+		if (_size == 0) return Iterator(NULL, this);
+		size_t idx = 0;
+		while (idx < _table.size())
+		{
+			if (_table[idx])
+			{
+				return Iterator(_table[idx], this);
+			}
+			++idx;
+		}
+	}
+	Iterator End()
+	{
+		return Iterator(NULL, this);
+	}
+	bool InsertEqual(const K& key, const V& value)
+	{
+		CheckCapacity();
+		size_t bullket = _HashFunc(key);
+		Node * NewNode = new Node(make_pair(key,value));
+		NewNode->_pNext = _table[bullket];
+		_table[bullket] = NewNode;
+		_size++;
+		return true;
+	}
+	bool RemoveEqual(const K& key)
+	{
+		size_t bullket = _HashFunc(key);
+		Node*pCur = _table[bullket];
+		Node*prev = NULL;
+		size_t size = _size;
+		while (pCur)
+		{
+			if (pCur->_kv.first == key)
+			{
+				if (pCur == _table[bullket])
+				{
+					_table[bullket] = pCur->_pNext;
+					delete pCur;
+					pCur = _table[bullket];
+				}
+				else
+				{
+					prev->_pNext = pCur->_pNext;
+					delete pCur;
+					pCur = prev->_pNext;
+				}
+				_size--;
+			}
+			else
+			{
+				prev = pCur;
+				pCur = pCur->_pNext;
+			}
+		}
+		return _size==size;
+	}
+
+	pair<Node*, bool> InsertUnique(const K& key, const V& value)
+	{
+		CheckCapacity();
+		size_t addr = _HashFunc(key);
+		if (_table[addr] == NULL)
+		{
+			_table[addr] = new Node(make_pair(key,value));
+			_size++;
+			return pair<Node*, bool>(_table[addr],true);
+		}
+		Node * pCur = _table[addr];
+		while (pCur)
+		{
+			if (pCur->_kv.first == key) return pair<Node*, bool>((Node*)NULL, false);
+			pCur = pCur->_pNext;
+		}
+		Node* NewNode = new Node(make_pair(key, value));
+		NewNode->_pNext = _table[addr];
+		_table[addr] = NewNode;
+		_size++;
+		return pair<Node*, bool>(NewNode, true);
+	}
+	bool RemoveUnique(const K& key)
+	{
+		RemoveEqual(key);
+	}
+	pair<Node*, bool> Find(const K& key)
+	{
+		size_t bullket = _HashFunc(key);
+		Node*pCur = _table[bullket];
+		while (pCur)
+		{
+			if (pCur->_kv.first == key) return pair<Node*, bool>(pCur, true);
+		}
+		return pair<Node*,bool> ((Node*)NULL,false);
+	}
+	void Clear()
+	{
+		Node*pCur = NULL;
+		Node*del = NULL;
+		for (size_t idx = 0; idx < _table.size(); idx++)
+		{
+			pCur = _table[idx];
+			while (pCur)
+			{
+				del = pCur;
+				pCur = pCur->_pNext;
+				delete del;
+			}
+		}
+	}
+	size_t Size()const
+	{
+		return _size;
+	}
+	bool Empty()const
+	{
+			return  _size == 0;
+	}
+	void Swap(HashTable<K, V>& ht)
+	{
+		_table.swap(ht._table);
+		swap(_size, ht._size);
+	}
+	size_t GetNextPrime(size_t size)
+	{
+		size_t idx = 0;
+		for (idx = 0; idx < _PrimeSize; idx++)
+		{
+			if (_PrimeList[idx]>size || _PrimeList[idx]==size) break;
+		}
+		return _PrimeList[idx];
+	}
+
+private:
+	void CheckCapacity()
+	{
+		if (_size == _table.size())
+		{
+			HashTable<K, V, HashFun> NewTable(GetNextPrime(_size + 1));
+			for (size_t idx = 0; idx < _table.size(); idx++)
+			{
+				Node * pCur = _table[idx];
+				while (pCur)
+				{
+					NewTable.InsertEqual(pCur->_kv.first, pCur->_kv.second);
+					pCur = pCur->_pNext;
+				}
+			}
+			Swap(NewTable);
+		}
+	}
+	size_t _HashFunc(const K& key)
+	{
+		return HashFun()(key) % _table.size();
+	}
+private:
+	vector<Node*> _table;
+	size_t _size;                          // 哈希表中有效元素的个数
+};
+void test()
+{
+	HashTable<int, int> ht;
+	for (size_t idx = 0; idx < 10; idx++)
+	{
+		ht.InsertUnique(idx, idx + 1);
+	}
+	cout<<"Unique 插入后大小"<<ht.Size()<<endl;
+	ht.InsertUnique(9, 1);
+	cout << "测试Unique 插入相同的key值，是否能插入成功，再次插入后大小：" << ht.Size() << endl;
+	ht.InsertEqual(9, 1);
+	cout << "测试equal 插入相同的key值，是否能插入成功，再次插入后大小：" << ht.Size() << endl;
+	cout << "测试用迭代器是否，可以成功遍历:" << endl;
+	HashTable<int, int>::Iterator it;
+	it = ht.Begin();
+	while (it != ht.End())
+	{
+		cout << (*it).first<<"   ";
+		++it;
+	}
+	cout << endl;
+
+}
+void test2()
+{
+	HashTable<string, int> ht;
+	ht.InsertUnique("1111", 1);
+	ht.InsertUnique("2222", 1);
+	ht.InsertUnique("3333", 1);
+	ht.InsertUnique("4444", 1);
+	cout << "Unique 插入后大小" << ht.Size() << endl;
+	ht.InsertUnique("4444", 1);
+	cout << "测试Unique 插入相同的key值，是否能插入成功，再次插入后大小：" << ht.Size() << endl;
+	ht.InsertEqual("4444", 1);
+	cout << "测试equal 插入相同的key值，是否能插入成功，再次插入后大小：" << ht.Size() << endl;
+	cout << "测试用迭代器是否，可以成功遍历:" << endl;
+	HashTable<string, int>::Iterator it;
+	it = ht.Begin();
+	while (it != ht.End())
+	{
+		cout << (*it).first.c_str() << "   ";
+		++it;
+	}
+	cout << endl;
+}
+int main()
+{
+	//test();
+	test2();
+	return 0;
+}
